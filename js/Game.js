@@ -91,23 +91,8 @@ class Game {
         for (const placement of this.tileManager.dynamitePlacements) {
             const [x, y] = placement.split(',').map(Number);
             
-            // First clear the visual effects in the 3x3 area
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                    const targetX = x + dx;
-                    const targetY = y + dy;
-                    if (targetX >= 0 && targetX < GameConfig.MAP_WIDTH &&
-                        targetY >= 0 && targetY < GameConfig.MAP_HEIGHT) {
-                        const tile = document.querySelector(`[data-x="${targetX}"][data-y="${targetY}"]`);
-                        if (tile) {
-                            tile.classList.remove('dynamite-preview');
-                            tile.removeAttribute('data-has-dynamite');
-                            tile.style.fontSize = '';
-                            tile.innerText = '';
-                        }
-                    }
-                }
-            }
+            // Just set the center tile to empty and let renderMap handle the display
+            this.tileManager.map[y][x] = GameConfig.TILE_TYPES.EMPTY;
 
             // Process 5x5 area (3x3 blast + adjacent tiles)
             for (let dy = -2; dy <= 2; dy++) {
@@ -156,6 +141,9 @@ class Game {
 
         // Clear all dynamite placements
         this.tileManager.dynamitePlacements.clear();
+
+        // Do a final render of the map to ensure all tiles are displayed correctly
+        this.tileManager.renderMap();
         
         // Update mined tiles counter
         this.minedTiles += minedOres;

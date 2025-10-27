@@ -157,16 +157,35 @@ class TileManager {
                 return;
             }
 
-            // Clear the tile's visual state completely
+            if (tileType === GameConfig.TILE_TYPES.DYNAMITE) {
+                // Clear surrounding highlights for dynamite
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const nearbyX = x + dx;
+                        const nearbyY = y + dy;
+                        if (nearbyX >= 0 && nearbyX < GameConfig.MAP_WIDTH &&
+                            nearbyY >= 0 && nearbyY < GameConfig.MAP_HEIGHT) {
+                            const nearbyTile = document.querySelector(`[data-x="${nearbyX}"][data-y="${nearbyY}"]`);
+                            if (nearbyTile) {
+                                nearbyTile.classList.remove('dynamite-placed', 'dynamite-hover');
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Clear any dynamite-specific attributes from this tile
             const tile = document.querySelector(`[data-x="${x}"][data-y="${y}"]`);
             if (tile) {
-                tile.className = 'tile tile-empty'; // Reset to basic tile class
-                tile.classList.remove('dynamite-preview');
+                tile.classList.remove('dynamite-placed', 'dynamite-hover');
                 tile.removeAttribute('data-has-dynamite');
-                tile.style.fontSize = '';
-                tile.style.backgroundColor = '';
-                tile.innerText = '';
+                if (tileType === GameConfig.TILE_TYPES.DYNAMITE) {
+                    tile.innerText = '';
+                }
             }
+
+            // Set the tile to empty
+            this.setTile(x, y, GameConfig.TILE_TYPES.EMPTY);
 
             if (this.game.oreValues[tileType]) {
                 this.game.money += this.game.oreValues[tileType];
@@ -302,6 +321,20 @@ class TileManager {
                    isSolid(this.map[y+1][x]) ||
                    this.map[y+1][x] === GameConfig.TILE_TYPES.SHORING;
         } else if (itemType === 'DYNAMITE') {
+            // First check if there's any dynamite in the surrounding area
+            for (let dy = -2; dy <= 2; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                    const nearbyX = x + dx;
+                    const nearbyY = y + dy;
+                    if (nearbyX >= 0 && nearbyX < GameConfig.MAP_WIDTH &&
+                        nearbyY >= 0 && nearbyY < GameConfig.MAP_HEIGHT) {
+                        if (this.map[nearbyY][nearbyX] === GameConfig.TILE_TYPES.DYNAMITE) {
+                            return false; // Can't place near other dynamite
+                        }
+                    }
+                }
+            }
+
             // Check if the target position is within 2 tiles of an access point
             for (let dy = -2; dy <= 2; dy++) {
                 for (let dx = -2; dx <= 2; dx++) {
@@ -316,27 +349,13 @@ class TileManager {
 
                     const tile = this.map[checkY][checkX];
                     
-                    // First check if there's any dynamite in the surrounding area
-                    for (let dy2 = -2; dy2 <= 2; dy2++) {
-                        for (let dx2 = -2; dx2 <= 2; dx2++) {
-                            const nearbyX = x + dx2;
-                            const nearbyY = y + dy2;
-                            if (nearbyX >= 0 && nearbyX < GameConfig.MAP_WIDTH &&
-                                nearbyY >= 0 && nearbyY < GameConfig.MAP_HEIGHT) {
-                                if (this.map[nearbyY][nearbyX] === GameConfig.TILE_TYPES.DYNAMITE) {
-                                    return false; // Can't place near other dynamite
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Check if this tile is an access point (empty, ladder, or horizontal shoring)
+                    // Check if this tile is an access point (empty, ladder, or shoring)
                     if (tile === GameConfig.TILE_TYPES.EMPTY || 
                         tile === GameConfig.TILE_TYPES.LADDER ||
-                        (tile === GameConfig.TILE_TYPES.SHORING && checkY === y)) { // Only allow horizontal shoring access
+                        tile === GameConfig.TILE_TYPES.SHORING) {
                         
-                        // Calculate Manhattan distance to access point
-                        const distance = Math.abs(x - checkX) + Math.abs(y - checkY);
+                        // Use Euclidean distance instead of Manhattan distance
+                        const distance = Math.sqrt(Math.pow(x - checkX, 2) + Math.pow(y - checkY, 2));
                         if (distance <= 2) { // Within 2 tiles reach
                             return true;
                         }
