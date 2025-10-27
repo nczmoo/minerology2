@@ -28,6 +28,14 @@ class Player {
         
         while (currentY < GameConfig.MAP_HEIGHT - 1) {
             const tileBelow = this.game.tileManager.getTile(x, currentY + 1);
+            const currentTile = this.game.tileManager.getTile(x, currentY);
+            
+            // Stop falling if there's a ladder in current tile or below
+            if (currentTile === GameConfig.TILE_TYPES.LADDER || 
+                tileBelow === GameConfig.TILE_TYPES.LADDER) {
+                break;
+            }
+            
             if (tileBelow === GameConfig.TILE_TYPES.EMPTY || tileBelow === GameConfig.TILE_TYPES.SKY) {
                 if (tileBelow === GameConfig.TILE_TYPES.EMPTY) {
                     fallDistance++;
@@ -74,23 +82,36 @@ class Player {
                 break;
             case GameConfig.DIRECTIONS.DOWN:
                 if (newY < GameConfig.MAP_HEIGHT - 1) {
-                    newY++;
-                    const targetTile = this.game.tileManager.getTile(newX, newY);
-                    if (targetTile !== GameConfig.TILE_TYPES.EMPTY && 
+                    const currentTile = this.game.tileManager.getTile(oldX, oldY);
+                    const targetTile = this.game.tileManager.getTile(newX, newY + 1);
+                    const belowTile = this.game.tileManager.getTile(newX, newY + 1);
+                    
+                    // Can climb down ladders
+                    if (currentTile === GameConfig.TILE_TYPES.LADDER || 
+                        belowTile === GameConfig.TILE_TYPES.LADDER) {
+                        newY++;
+                    } 
+                    // Otherwise try to mine if not hitting empty/sky/ladder/shoring
+                    else if (targetTile !== GameConfig.TILE_TYPES.EMPTY && 
                         targetTile !== GameConfig.TILE_TYPES.SKY &&
                         targetTile !== GameConfig.TILE_TYPES.LADDER &&
                         targetTile !== GameConfig.TILE_TYPES.SHORING &&
-                        this.game.tileManager.getTile(oldX, oldY) !== GameConfig.TILE_TYPES.SHORING) {
-                        this.game.tileManager.mineTile(newX, newY);
+                        currentTile !== GameConfig.TILE_TYPES.SHORING) {
+                        this.game.tileManager.mineTile(newX, newY + 1);
                         return;
                     }
                 }
                 break;
             case GameConfig.DIRECTIONS.UP:
                 if (this.y > 0) {
-                    if (this.game.tileManager.getTile(oldX, oldY - 1) === GameConfig.TILE_TYPES.LADDER) {
+                    const currentTile = this.game.tileManager.getTile(oldX, oldY);
+                    const aboveTile = this.game.tileManager.getTile(oldX, oldY - 1);
+                    
+                    // Can climb up if currently on ladder or there's a ladder above
+                    if (currentTile === GameConfig.TILE_TYPES.LADDER || 
+                        aboveTile === GameConfig.TILE_TYPES.LADDER) {
                         newY--;
-                    } else if (this.game.tileManager.getTile(oldX, oldY) !== GameConfig.TILE_TYPES.SHORING) {
+                    } else if (currentTile !== GameConfig.TILE_TYPES.SHORING) {
                         this.game.tileManager.mineTile(oldX, oldY - 1);
                         return;
                     }
@@ -110,15 +131,17 @@ class Player {
             this.y = newY;
             this.updatePosition();
 
-            if (direction !== GameConfig.DIRECTIONS.UP && currentTile !== GameConfig.TILE_TYPES.LADDER) {
+            // Only check for falling if:
+            // 1. Not moving up
+            // 2. Not on a ladder
+            // 3. Not moving to a ladder
+            if (direction !== GameConfig.DIRECTIONS.UP && 
+                currentTile !== GameConfig.TILE_TYPES.LADDER && 
+                targetTile !== GameConfig.TILE_TYPES.LADDER) {
                 const tileBelowNew = this.game.tileManager.getTile(newX, newY + 1);
                 if (tileBelowNew === GameConfig.TILE_TYPES.EMPTY) {
                     this.handleFall(newX, newY);
                 }
-            } else if (currentTile === GameConfig.TILE_TYPES.LADDER && 
-                     targetTile === GameConfig.TILE_TYPES.EMPTY &&
-                     direction !== GameConfig.DIRECTIONS.UP) {
-                this.handleFall(newX, newY);
             }
         } else {
             this.game.tileManager.mineTile(newX, newY);
@@ -126,7 +149,23 @@ class Player {
     }
 
     resetPosition() {
+        // Start at initialX but find the highest solid ground at the surface
         this.x = this.initialX;
+        
+        // Start checking from the surface height and go down until we find solid ground
+        for (let y = GameConfig.SURFACE_HEIGHT; y < GameConfig.MAP_HEIGHT; y++) {
+            const tile = this.game.tileManager.getTile(this.x, y);
+            if (tile === GameConfig.TILE_TYPES.DIRT || 
+                tile === GameConfig.TILE_TYPES.STONE ||
+                tile === GameConfig.TILE_TYPES.LADDER) {
+                // Stand on top of the solid ground
+                this.y = y - 1;
+                this.updatePosition();
+                return;
+            }
+        }
+        
+        // If no solid ground found (shouldn't happen), use initial Y
         this.y = this.initialY;
         this.updatePosition();
     }

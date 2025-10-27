@@ -1,10 +1,5 @@
-let game;
-let ui;
-
 window.addEventListener('DOMContentLoaded', () => {
-    game = new Game();
-    ui = new UI();
-    ui.refresh();
+    window.game = new Game();
 });
 
 function fetch_rand(min, max) {

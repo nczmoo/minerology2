@@ -16,11 +16,12 @@ class MapGenerator {
         // Generate surface and underground with dirt variance
         for (let x = 0; x < GameConfig.MAP_WIDTH; x++) {
             let surfaceHeight = GameConfig.SURFACE_HEIGHT;
-            let maxDirtDepth = surfaceHeight + Math.floor(Math.random() * 4) + 2;
+            let maxDirtDepth = surfaceHeight + 5; // Maximum guaranteed dirt depth is 5 tiles
 
             // Fill dirt layers with better connectivity
             for (let y = surfaceHeight; y < GameConfig.MAP_HEIGHT; y++) {
                 if (y < maxDirtDepth) {
+                    // Guaranteed dirt layer for first 5 tiles
                     map[y][x] = GameConfig.TILE_TYPES.DIRT;
                 } else {
                     let neighboringDirt = 0;
@@ -28,18 +29,20 @@ class MapGenerator {
                     if (y > 0 && map[y-1][x] === GameConfig.TILE_TYPES.DIRT) neighboringDirt++;
                     if (x < GameConfig.MAP_WIDTH-1 && y > 0 && map[y-1][x+1] === GameConfig.TILE_TYPES.DIRT) neighboringDirt++;
                     
-                    let dirtChance = Math.pow(GameConfig.DIRT_DECAY_RATE, (y - maxDirtDepth) * 0.5);
+                    // Drastically reduce dirt chance below 5 tiles
+                    let dirtChance = Math.pow(0.2, (y - maxDirtDepth) * 0.8); // Steeper decay rate
+                    
+                    // Small boost if there's neighboring dirt
                     if (neighboringDirt > 0) {
-                        dirtChance += (neighboringDirt * 0.2);
+                        dirtChance += (neighboringDirt * 0.05); // Reduced neighbor influence
                     }
                     
-                    if (Math.random() < 0.05 && y < GameConfig.MAX_DIRT_DEPTH + 3) {
-                        dirtChance = 0.8;
+                    // Very rare chance for isolated dirt patches
+                    if (Math.random() < 0.01) {
+                        dirtChance = 0.3; // Reduced chance even for rare patches
                     }
 
-                    map[y][x] = Math.random() < dirtChance && y < GameConfig.MAX_DIRT_DEPTH + Math.floor(Math.random() * 3) 
-                        ? GameConfig.TILE_TYPES.DIRT 
-                        : GameConfig.TILE_TYPES.STONE;
+                    map[y][x] = Math.random() < dirtChance ? GameConfig.TILE_TYPES.DIRT : GameConfig.TILE_TYPES.STONE;
                 }
             }
         }
@@ -49,7 +52,6 @@ class MapGenerator {
         // Generate ore veins
         this.generateOreVeins(map, 'coal', 16, true);   // Coal is most common, can be in dirt
         this.generateOreVeins(map, 'iron', 8, true);    // Iron can be in dirt
-        this.generateOreVeins(map, 'copper', 7, true);  // Copper can be in dirt
         this.generateOreVeins(map, 'gold', 5, false);   // Gold only in stone
     }
 
@@ -119,6 +121,30 @@ class MapGenerator {
     static isValidOrePosition(map, x, y, canBeInDirt) {
         if (x < 0 || x >= GameConfig.MAP_WIDTH || y < 0 || y >= GameConfig.MAP_HEIGHT) {
             return false;
+        }
+
+        // For gold (when canBeInDirt is false), strictly check for no adjacent dirt
+        if (!canBeInDirt) {
+            if (map[y][x] !== GameConfig.TILE_TYPES.STONE) return false;
+            
+            // Check all adjacent tiles including diagonals
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    
+                    const checkX = x + dx;
+                    const checkY = y + dy;
+                    
+                    if (checkX >= 0 && checkX < GameConfig.MAP_WIDTH &&
+                        checkY >= 0 && checkY < GameConfig.MAP_HEIGHT) {
+                        const tile = map[checkY][checkX];
+                        if (tile === GameConfig.TILE_TYPES.DIRT) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return true;
         }
 
         return map[y][x] === GameConfig.TILE_TYPES.STONE ||

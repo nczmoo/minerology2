@@ -27,21 +27,21 @@ class GameConfig {
         STONE: 'stone',
         DIRT: 'dirt',
         IRON: 'iron',
-        COPPER: 'copper',
         GOLD: 'gold',
         COAL: 'coal',
         LADDER: 'ladder',
-        SHORING: 'shoring'
+        SHORING: 'shoring',
+        DYNAMITE: 'dynamite'
     };
 
     static SHOP_ITEMS = {
         LADDER: { price: 10, symbol: '|' },
-        SHORING: { price: 100, symbol: '=' }
+        SHORING: { price: 100, symbol: '=' },
+        DYNAMITE: { price: 50, symbol: '▣' }
     };
 
     static ORE_VEIN_SIZES = {
         'iron': { minLength: 6, maxLength: 12, width: 2 },
-        'copper': { minLength: 4, maxLength: 8, width: 2 },
         'gold': { minLength: 3, maxLength: 6, width: 1 },
         'coal': { minLength: 8, maxLength: 16, width: 3 }  // Coal has larger veins
     };

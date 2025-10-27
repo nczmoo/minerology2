@@ -3,6 +3,7 @@ class TileManager {
         this.game = game;
         this.map = [];
         this.collapseTimes = {};
+        this.dynamitePlacements = new Set(); // Store dynamite placement centers
     }
 
     generateMap() {
@@ -81,6 +82,27 @@ class TileManager {
     decorateTile(tile, x, y, tileType) {
         const key = `${x},${y}`;
 
+        // First clear any existing decorations
+        tile.classList.remove('dynamite-placed', 'dynamite-hover');
+        tile.removeAttribute('data-has-dynamite');
+        
+        // Check if this tile is part of a dynamite blast area
+        for (let placement of this.dynamitePlacements) {
+            const [dx, dy] = placement.split(',').map(Number);
+            // Add dynamite icon to center tile
+            if (x === dx && y === dy) {
+                tile.innerText = '💣';
+                tile.style.fontSize = '16px';
+                tile.setAttribute('data-has-dynamite', 'true');
+                // Set the tile type to dynamite in the map
+                this.map[y][x] = GameConfig.TILE_TYPES.DYNAMITE;
+            }
+            // Add red highlight to 3x3 area
+            if (Math.abs(x - dx) <= 1 && Math.abs(y - dy) <= 1) {
+                tile.classList.add('dynamite-placed');
+            }
+        }
+
         if (tileType === GameConfig.TILE_TYPES.LADDER) {
             tile.innerText = GameConfig.SHOP_ITEMS.LADDER.symbol;
         } else if (tileType === GameConfig.TILE_TYPES.SHORING) {
@@ -101,13 +123,51 @@ class TileManager {
         }
     }
 
-    mineTile(x, y) {
+    async explodeDynamite(x, y) {
+        // Mine a 3x3 area around the dynamite
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const targetX = x + dx;
+                const targetY = y + dy;
+                if (targetX >= 0 && targetX < GameConfig.MAP_WIDTH &&
+                    targetY >= 0 && targetY < GameConfig.MAP_HEIGHT) {
+                    // Don't explode other dynamite, ladders, or shoring
+                    const targetTile = this.getTile(targetX, targetY);
+                    if (targetTile !== GameConfig.TILE_TYPES.DYNAMITE &&
+                        targetTile !== GameConfig.TILE_TYPES.LADDER &&
+                        targetTile !== GameConfig.TILE_TYPES.SHORING) {
+                        this.mineTile(targetX, targetY, false);
+                    }
+                }
+            }
+        }
+        // Finally remove the dynamite itself
+        this.setTile(x, y, GameConfig.TILE_TYPES.EMPTY);
+    }
+
+    mineTile(x, y, checkDynamite = true) {
         const tileType = this.getTile(x, y);
         if (tileType !== GameConfig.TILE_TYPES.EMPTY && 
             tileType !== GameConfig.TILE_TYPES.SKY &&
             tileType !== GameConfig.TILE_TYPES.LADDER &&
             tileType !== GameConfig.TILE_TYPES.SHORING) {
             
+            if (checkDynamite && tileType === GameConfig.TILE_TYPES.DYNAMITE) {
+                this.explodeDynamite(x, y);
+                return;
+            }
+
+            // Clear the tile's visual state completely
+            const tile = document.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+            if (tile) {
+                tile.className = 'tile tile-empty'; // Reset to basic tile class
+                tile.classList.remove('dynamite-preview');
+                tile.removeAttribute('data-has-dynamite');
+                tile.style.fontSize = '';
+                tile.style.backgroundColor = '';
+                tile.innerText = '';
+            }
+
             if (this.game.oreValues[tileType]) {
                 this.game.money += this.game.oreValues[tileType];
                 this.game.displayManager.updateMoneyDisplay();
@@ -133,7 +193,8 @@ class TileManager {
     }
 
     tryPlaceItem(x, y) {
-        const itemType = this.game.displayManager.selectedShopItem;
+        const displayManager = this.game.displayManager;
+        const itemType = displayManager.selectedShopItem;
         if (!itemType || this.game.miningEnabled) return;
 
         const item = GameConfig.SHOP_ITEMS[itemType];
@@ -142,29 +203,147 @@ class TileManager {
             return;
         }
 
-        if (this.map[y][x] !== GameConfig.TILE_TYPES.EMPTY) return;
+        // Special handling for dynamite - can be placed on any valid tile
+        if (itemType === 'DYNAMITE') {
+            if (this.canPlaceItem(itemType, x, y)) {
+                this.dynamitePlacements.add(`${x},${y}`);
+                
+                // Update the center tile
+                this.setTile(x, y, GameConfig.TILE_TYPES.DYNAMITE);
+                const centerTile = document.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+                if (centerTile) {
+                    centerTile.innerText = '💣';
+                    centerTile.setAttribute('data-has-dynamite', 'true');
+                }
 
-        if (this.canPlaceItem(itemType, x, y)) {
-            this.game.money -= item.price;
-            this.game.displayManager.updateMoneyDisplay();
-            this.setTile(x, y, GameConfig.TILE_TYPES[itemType]);
-        } else {
-            alert('Cannot place item here!');
+                // Update the blast area
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const targetX = x + dx;
+                        const targetY = y + dy;
+                        if (targetX >= 0 && targetX < GameConfig.MAP_WIDTH &&
+                            targetY >= 0 && targetY < GameConfig.MAP_HEIGHT) {
+                            const tile = document.querySelector(`[data-x="${targetX}"][data-y="${targetY}"]`);
+                            if (tile) {
+                                tile.classList.add('dynamite-placed');
+                            }
+                        }
+                    }
+                }
+
+                // Deduct cost and update display
+                this.game.money -= item.price;
+                this.game.displayManager.updateMoneyDisplay();
+                // Don't cancel build mode - allow continued placement
+            }
+            return;
         }
+
+        // First click - set start point for other items
+        if (displayManager.buildStartX === null) {
+            if (this.canPlaceItem(itemType, x, y)) {
+                displayManager.buildStartX = x;
+                displayManager.buildStartY = y;
+                displayManager.updatePlaceableHighlights(x, y);
+            }
+            return;
+        }
+
+        // Second click - handle build or cancel
+        // If clicking on start position, cancel the build
+        if (x === displayManager.buildStartX && y === displayManager.buildStartY) {
+            displayManager.cancelBuild();
+            return;
+        }
+
+        // Get tiles to place based on current hover position
+        const placeableTiles = displayManager.updatePlaceableHighlights(x, y);
+        
+        if (!placeableTiles || placeableTiles.length === 0) {
+            return; // Invalid placement, do nothing
+        }
+
+        // Calculate total cost
+        const totalCost = placeableTiles.length * item.price;
+        if (this.game.money < totalCost) {
+            return; // Not enough money, do nothing
+        }
+
+        // Place all items
+        placeableTiles.forEach(pos => {
+            this.setTile(pos.x, pos.y, GameConfig.TILE_TYPES[itemType]);
+        });
+
+        // Deduct total cost and update display
+        this.game.money -= totalCost;
+        this.game.displayManager.updateMoneyDisplay();
+        
+        // Reset build state
+        displayManager.cancelBuild();
     }
 
     canPlaceItem(itemType, x, y) {
         if (itemType === 'LADDER') {
-            return y === GameConfig.SURFACE_HEIGHT || 
-                   (y > 0 && this.map[y-1][x] === GameConfig.TILE_TYPES.LADDER) ||
-                   (y < GameConfig.MAP_HEIGHT-1 && this.map[y+1][x] === GameConfig.TILE_TYPES.LADDER) ||
-                   (y < GameConfig.MAP_HEIGHT-1 && this.map[y+1][x] !== GameConfig.TILE_TYPES.EMPTY && 
-                    this.map[y+1][x] !== GameConfig.TILE_TYPES.SKY);
+            // Allow ladder if:
+            // 1. It's at or below surface height (y >= surface)
+            // 2. OR it connects to another ladder above or below
+            // 3. OR it has a solid block below (not empty/sky)
+            const atOrBelowSurface = y >= GameConfig.SURFACE_HEIGHT;
+            const connectsToLadder = (y > 0 && this.map[y-1][x] === GameConfig.TILE_TYPES.LADDER) ||
+                                   (y < GameConfig.MAP_HEIGHT-1 && this.map[y+1][x] === GameConfig.TILE_TYPES.LADDER);
+            const belowIsSolid = y < GameConfig.MAP_HEIGHT-1 && 
+                                this.map[y+1][x] !== GameConfig.TILE_TYPES.EMPTY && 
+                                this.map[y+1][x] !== GameConfig.TILE_TYPES.SKY;
+            
+            return atOrBelowSurface || connectsToLadder || belowIsSolid;
         } else if (itemType === 'SHORING') {
             const isSolid = tile => tile !== GameConfig.TILE_TYPES.EMPTY && tile !== GameConfig.TILE_TYPES.SKY;
             return y === GameConfig.MAP_HEIGHT-1 || 
                    isSolid(this.map[y+1][x]) ||
                    this.map[y+1][x] === GameConfig.TILE_TYPES.SHORING;
+        } else if (itemType === 'DYNAMITE') {
+            // Check if the target position is within 2 tiles of an access point
+            for (let dy = -2; dy <= 2; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                    const checkX = x + dx;
+                    const checkY = y + dy;
+                    
+                    // Skip if out of bounds
+                    if (checkX < 0 || checkX >= GameConfig.MAP_WIDTH ||
+                        checkY < 0 || checkY >= GameConfig.MAP_HEIGHT) {
+                        continue;
+                    }
+
+                    const tile = this.map[checkY][checkX];
+                    
+                    // First check if there's any dynamite in the surrounding area
+                    for (let dy2 = -2; dy2 <= 2; dy2++) {
+                        for (let dx2 = -2; dx2 <= 2; dx2++) {
+                            const nearbyX = x + dx2;
+                            const nearbyY = y + dy2;
+                            if (nearbyX >= 0 && nearbyX < GameConfig.MAP_WIDTH &&
+                                nearbyY >= 0 && nearbyY < GameConfig.MAP_HEIGHT) {
+                                if (this.map[nearbyY][nearbyX] === GameConfig.TILE_TYPES.DYNAMITE) {
+                                    return false; // Can't place near other dynamite
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check if this tile is an access point (empty, ladder, or horizontal shoring)
+                    if (tile === GameConfig.TILE_TYPES.EMPTY || 
+                        tile === GameConfig.TILE_TYPES.LADDER ||
+                        (tile === GameConfig.TILE_TYPES.SHORING && checkY === y)) { // Only allow horizontal shoring access
+                        
+                        // Calculate Manhattan distance to access point
+                        const distance = Math.abs(x - checkX) + Math.abs(y - checkY);
+                        if (distance <= 2) { // Within 2 tiles reach
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
         }
         return false;
     }
@@ -180,6 +359,7 @@ class TileManager {
 
     hasEmptyBelow(x, y) {
         if (y >= GameConfig.MAP_HEIGHT - 1) return false;
+        // Only check directly below
         return this.map[y + 1][x] === GameConfig.TILE_TYPES.EMPTY;
     }
 
@@ -237,24 +417,16 @@ class TileManager {
 
         do {
             changed = false;
-            // Scan from top to bottom for each column
-            for (let x = 0; x < GameConfig.MAP_WIDTH; x++) {
-                for (let y = 0; y < GameConfig.MAP_HEIGHT - 1; y++) {
-                    if (this.map[y][x] === GameConfig.TILE_TYPES.DIRT) {
-                        // Try to find the lowest empty spot below this dirt
-                        let newY = y;
-                        while (newY < GameConfig.MAP_HEIGHT - 1 && 
-                               (this.map[newY + 1][x] === GameConfig.TILE_TYPES.EMPTY)) {
-                            newY++;
-                        }
-                        
-                        // If we found a new position, move the dirt
-                        if (newY !== y && !this.hasShoring(x, y)) {
-                            this.setTile(x, newY, GameConfig.TILE_TYPES.DIRT);
+            // Scan from bottom to top to track falling pieces
+            for (let y = GameConfig.MAP_HEIGHT - 2; y >= 0; y--) {
+                for (let x = 0; x < GameConfig.MAP_WIDTH; x++) {
+                    if (this.map[y][x] === GameConfig.TILE_TYPES.DIRT && !this.hasShoring(x, y)) {
+                        if (this.map[y + 1][x] === GameConfig.TILE_TYPES.EMPTY) {
+                            // Move one step at a time for smoother animation
+                            this.setTile(x, y + 1, GameConfig.TILE_TYPES.DIRT);
                             this.setTile(x, y, GameConfig.TILE_TYPES.EMPTY);
                             changed = true;
                             await sleep(ANIMATION_DELAY);
-                            break; // Only move one piece at a time in this column
                         }
                     }
                 }
@@ -287,15 +459,20 @@ class TileManager {
                 const tile = this.getTile(x, y);
                 const key = `${x},${y}`;
 
-                if (tile === GameConfig.TILE_TYPES.STONE) {
-                    // Only start collapse timer if stone is unsupported and has empty space below
+                // Check both stone and ore tiles for collapse
+                if (tile === GameConfig.TILE_TYPES.STONE || 
+                    tile === GameConfig.TILE_TYPES.GOLD || 
+                    tile === GameConfig.TILE_TYPES.IRON || 
+                    tile === GameConfig.TILE_TYPES.COAL) {
+                    
+                    // Only start collapse timer if tile is unsupported and has empty space below
                     if (!this.hasShoring(x, y) && this.hasEmptyBelow(x, y)) {
                         if (!this.collapseTimes[key]) {
                             this.collapseTimes[key] = GameConfig.INITIAL_COLLAPSE_TIMER;
                             this.updateTileDisplay(x, y);
                         }
                     } else {
-                        // Remove timer if stone is now supported
+                        // Remove timer if tile is now supported
                         if (this.collapseTimes[key]) {
                             delete this.collapseTimes[key];
                             this.updateTileDisplay(x, y);
@@ -309,12 +486,24 @@ class TileManager {
     processCollapseTimers() {
         for (const key of Object.keys(this.collapseTimes)) {
             const [x, y] = key.split(',').map(Number);
+            
+            // Check if the tile still needs to collapse
+            if (!this.hasEmptyBelow(x, y) || this.hasShoring(x, y)) {
+                delete this.collapseTimes[key];
+                this.updateTileDisplay(x, y);
+                continue;
+            }
+
             this.collapseTimes[key]--;
 
             if (this.collapseTimes[key] <= 0) {
                 delete this.collapseTimes[key];
-                // Convert stone to dirt when timer expires
-                if (this.map[y][x] === GameConfig.TILE_TYPES.STONE) {
+                // Convert any collapsible tile to dirt when timer expires
+                const tile = this.map[y][x];
+                if (tile === GameConfig.TILE_TYPES.STONE || 
+                    tile === GameConfig.TILE_TYPES.GOLD || 
+                    tile === GameConfig.TILE_TYPES.IRON || 
+                    tile === GameConfig.TILE_TYPES.COAL) {
                     this.setTile(x, y, GameConfig.TILE_TYPES.DIRT);
                 }
             } else {
